@@ -32,6 +32,8 @@ To publish an update, push a semantic version tag such as `v0.2.0`. The GitHub A
 
 The original package recovery contains declarative effect XML, preview images, scene examples, UI resources, and Smali bytecode. These are useful format and behavior references, but they do not provide an original Windows renderer or guarantee that mobile effects can run unchanged on desktop. Import and rendering coverage will be tracked explicitly as it is implemented.
 
+See [ROADMAP.md](ROADMAP.md) for the current feature status and the remaining work toward a fuller editor.
+
 ## License
 
 The Video Motion application code in this repository is licensed under Apache-2.0. Imported projects and media remain the user's property. Do not assume third-party APK assets, artwork, fonts, or effect code are relicensed by this repository.
