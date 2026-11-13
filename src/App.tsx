@@ -139,7 +139,7 @@ function App() {
 
   const selectedLayer = project?.layers.find((layer) => layer.id === selectedLayerId) || null;
   const filteredProjects = projects.filter((item) => item.title.toLowerCase().includes(query.toLowerCase()));
-  const effectList = useMemo(() => catalog.filter((effect) => `${effect.name} ${effect.category} ${effect.tags} ${effect.description}`.toLowerCase().includes(effectSearch.toLowerCase())), [catalog, effectSearch]);
+  const effectList = useMemo(() => catalog.filter((effect) => !effect.internal && `${effect.name} ${effect.category} ${effect.tags} ${effect.description}`.toLowerCase().includes(effectSearch.toLowerCase())), [catalog, effectSearch]);
 
   const openProject = async (id: string) => {
     if (!desktop) return setNotice('Abra Video Motion no aplicativo para acessar arquivos locais.');
@@ -331,11 +331,11 @@ function App() {
         {panel === 'effects' && <>
           <div className="search-box panel-search"><Search size={15} /><input value={effectSearch} onChange={(event) => setEffectSearch(event.target.value)} placeholder="Buscar efeitos" /></div>
           <div className="effect-list">
-            {effectList.map((effect) => <button className="effect-row" key={effect.id} onClick={() => addEffect(effect)} title={selectedLayer ? 'Adicionar à camada selecionada' : 'Selecione uma camada para adicionar'}>
-              <span className="effect-thumb">{effect.preview ? <img src={`./previews/effects/${effect.preview}`} /> : <Sparkles size={17} />}</span><span className="effect-copy"><strong>{effect.name}</strong><small>{effect.category || 'Geral'} · {(safeParseParameters(effect.parameters_json)).length} controles</small></span><Plus size={15} className="effect-add" />
+            {effectList.map((effect) => <button className="effect-row" key={effect.id} onClick={() => addEffect(effect)} title={`${effect.name}${effect.description ? ' — ' + effect.description : ''}`}>
+              <span className="effect-thumb">{effect.preview ? <img loading="lazy" alt={`Prévia de ${effect.name}`} src={`./previews/effects/${effect.preview}`} /> : <Sparkles size={17} />}</span><span className="effect-copy"><strong>{effect.name}</strong><small>{categoryLabel(effect.category)} · {(safeParseParameters(effect.parameters_json)).length} controles</small></span><Plus size={15} className="effect-add" />
             </button>)}
           </div>
-          <div className="panel-footnote">{catalog.length ? `${catalog.length} efeitos recuperados · busca local` : 'Carregando catálogo de efeitos…'}<br /><small>Shader completo ainda não faz parte deste primeiro editor.</small></div>
+          <div className="panel-footnote">{catalog.length ? `${catalog.filter(effect => !effect.internal).length} efeitos · busca local` : 'Carregando catálogo de efeitos…'}<br /><small>Shader completo ainda não faz parte deste primeiro editor.</small></div>
         </>}
         {panel === 'media' && <div className="panel-empty"><div className="drop-icon"><Image size={23} /></div><h3>Traga sua mídia</h3><p>Imagem, vídeo e áudio são copiados para a pasta do projeto.</p><button className="secondary-button full-width" onClick={() => void importMedia()}><Plus size={16} /> Adicionar arquivos</button><div className="asset-list">{project.layers.filter((layer) => layer.assetPath).map((layer) => <div className="asset-list-item" key={layer.id}><FileTypeIcon kind={layer.kind} /><span>{layer.name}</span></div>)}</div></div>}
         {panel === 'text' && <div className="text-presets"><button className="text-preset" onClick={() => addLayer('text')}><span className="text-preset-icon">T</span><strong>Adicionar texto</strong><small>Crie uma camada editável</small></button><button className="text-preset" onClick={() => addLayer('shape', 'Título', undefined)}><span className="text-preset-icon gradient">Aa</span><strong>Título simples</strong><small>Texto centralizado</small></button></div>}
@@ -457,8 +457,10 @@ function TransformField({ label, value, suffix, onChange, onKeyframe, active }: 
 function EffectInspector({ effect, catalog, onChange, onRemove }: { effect: MotionEffect; catalog: EffectDefinition[]; onChange: (effect: MotionEffect) => void; onRemove: () => void }) {
   const definition = catalog.find((item) => item.id === effect.effectId);
   const parameters = definition ? safeParseParameters(definition.parameters_json) : [];
-  return <div className="effect-inspector"><div className="effect-inspector-head"><span className="effect-mini-thumb">{effect.preview ? <img src={`./previews/effects/${effect.preview}`} /> : <Sparkles size={13} />}</span><strong>{effect.name}</strong><button className="icon-button tiny" onClick={() => onChange({ ...effect, enabled: !effect.enabled })} title={effect.enabled ? 'Desativar efeito' : 'Ativar efeito'}><Eye size={13} /></button><button className="icon-button tiny" onClick={onRemove} title="Remover efeito"><X size={13} /></button></div>
+  const preview = effect.preview || definition?.preview;
+  return <div className="effect-inspector"><div className="effect-inspector-head"><span className="effect-mini-thumb">{preview ? <img loading="lazy" alt={`Prévia de ${effect.name}`} src={`./previews/effects/${preview}`} /> : <Sparkles size={13} />}</span><strong>{definition?.name || effect.name}</strong><button className="icon-button tiny" onClick={() => onChange({ ...effect, enabled: !effect.enabled })} title={effect.enabled ? 'Desativar efeito' : 'Ativar efeito'}><Eye size={13} /></button><button className="icon-button tiny" onClick={onRemove} title="Remover efeito"><X size={13} /></button></div>
     {parameters.map((parameter) => <EffectParameterControl key={parameter.id} parameter={parameter} value={effect.parameters[parameter.id]} onChange={(value) => onChange({ ...effect, parameters: { ...effect.parameters, [parameter.id]: value } })} />)}
+    {effect.compatibility === 'native' && <div className="compatibility-note">Prévia aproximada no editor</div>}
     {effect.compatibility === 'metadata-only' && <div className="compatibility-note">Controle recuperado · renderização ainda indisponível</div>}
   </div>;
 }
@@ -472,10 +474,11 @@ function EffectParameterControl({ parameter, value, onChange }: { parameter: Eff
     return <div className="effect-parameter"><span>{parameter.label || parameter.id}</span><div className="effect-vector">{vector.slice(0, count).map((axis, index) => <label key={index}><small>{parameter.kind === 'point' ? ['X', 'Y'][index] : ['X', 'Y', 'Z'][index]}</small><input type="number" step="0.1" value={Number(axis) || 0} onChange={(event) => { const next = [...vector]; next[index] = Number(event.target.value); onChange(next); }} /></label>)}</div></div>;
   }
   if (parameter.kind === 'switch') return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} /></label>;
-  if (parameter.kind === 'selector' || parameter.kind === 'spinner') {
+  if (parameter.kind === 'selector') {
     const choices = parameter.choices.map((choice) => choice.split('='));
     return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><select value={String(value ?? parameter.default)} onChange={(event) => onChange(event.target.value)}>{choices.length ? choices.map(([label, option]) => <option key={option} value={option}>{label}</option>) : <option value={String(value ?? parameter.default)}>{String(value ?? parameter.default)}</option>}</select></label>;
   }
+  if (parameter.kind === 'spinner' || parameter.kind === 'float') return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><input aria-label={parameter.label || parameter.id} type="number" min={parameter.min === '' ? undefined : Number(parameter.min)} max={parameter.max === '' ? undefined : Number(parameter.max)} step={parameter.step || 'any'} value={Number.isFinite(numeric) ? numeric : 0} onChange={event => { if (event.target.value === '') return; const next=Number(event.target.value); if (!Number.isFinite(next)) return; const min=parameter.min === '' ? -Infinity : Number(parameter.min); const max=parameter.max === '' ? Infinity : Number(parameter.max); onChange(Math.max(min,Math.min(max,next))); }}/></label>;
   if (parameter.kind === 'color') return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><input type="color" value={/^#[\da-f]{6}$/i.test(String(value)) ? String(value) : '#ffffff'} onChange={(event) => onChange(event.target.value)} /></label>;
   if (parameter.kind === 'hue-disc') return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><input type="color" value={/^#[\da-f]{6}$/i.test(String(value)) ? String(value) : '#ff4f9a'} onChange={(event) => onChange(event.target.value)} /></label>;
   if (parameter.kind === 'tip' || parameter.kind === 'section') return null;
@@ -592,3 +595,5 @@ async function openProjectFromFile(event: ChangeEvent<HTMLInputElement>, api: Wi
 }
 
 export default App;
+
+function categoryLabel(category: string) { return ({distort:'Distorção',blur:'Desfoque',color:'Cor e luz',procedural:'Procedural',transform:'Transformação',text:'Texto',drawing:'Desenho',matte:'Máscara',blend:'Mesclagem','3d':'3D'} as Record<string,string>)[category] || category || 'Geral'; }

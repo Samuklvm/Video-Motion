@@ -15,6 +15,11 @@ Corrigidos durante a inspeção: corte da timeline em janela baixa, barra de rol
 
 ## Mudanças em main posteriores à release
 
+- Catálogo: 31 nomes genéricos corrigidos, 259 definições com prévias existentes e quatro novas associações explícitas. As 303 definições permanecem preservadas; 13 internas/experimentais ficam fora da biblioteca normal.
+- Categorias e modos de mesclagem com nomes em português. Nomes recuperados e nomes editoriais têm origem registrada no catálogo.
+- Efeitos importados consultam o catálogo para exibir nome e prévia. Controles numéricos deixam de aparecer como listas de uma única opção.
+- Nove testes automatizados passando, incluindo integridade dos vínculos entre definições, parâmetros e arquivos de prévia. Isso verifica referências, não equivalência visual dos shaders.
+
 - Oito presets de curva com miniaturas, copiar/colar, inverter e presets pessoais persistidos no navegador local do aplicativo.
 - Nomes das propriedades animadas em português.
 - Melhorias de contraste, hierarquia visual, tamanho de textos e acabamento dos painéis pretos.

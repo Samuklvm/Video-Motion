@@ -84,6 +84,7 @@ export interface EffectParameter {
 }
 
 export interface EffectDefinition {
+  internal?: boolean;
   id: string;
   file: string;
   name: string;
