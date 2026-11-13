@@ -1,0 +1,29 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<effect id="com.alightcreative.effects.jitter" name="@am:string/effect_jitter_name" desc="@am:string/effect_jitter_desc" auto-transform="true" category="transform" tags="transform,shake,propAdjust" thumb="thumb/jitter.webp">
+
+    <params>
+        <spinner id="angle" default="45" min="0.0" max="180.0" label="@am:string/effect_param_angle" type="angle" />
+        <spinner id="freq" default="30.0" min="1.0" max="60.0" label="@am:string/effect_param_freq" />
+        <spinner id="mag" default="25" min="1" max="500" label="@am:string/effect_param_mag" />
+        <slider id="seed" default="0" min="0" max="10" label="@am:string/effect_param_seed" />
+    </params>
+
+    <script lang="js"><![CDATA[
+
+        function animate(env,el,p) {
+            let globalTime = env.duration * env.time;
+            let t = globalTime - (globalTime % (1.0/p.freq));
+            var a = p.angle * (Math.PI / 180);
+            var dx = Math.sin(a);
+            var dy = Math.cos(a);
+            let m  = AM.simplexNoise(t*637.729,0,p.seed*394.417);
+            dx *= p.mag * m;
+            dy *= p.mag * m;
+            el.transform.location.x += dx;
+            el.transform.location.y += dy;
+            return el;
+        }
+
+    ]]></script>
+
+</effect>
