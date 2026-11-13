@@ -1,6 +1,6 @@
 {
   "name": "video-motion",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "private": true,
   "description": "A desktop video editor with a project library, animation timeline, effect controls, and Alight Motion project import compatibility.",
@@ -39,9 +39,24 @@
     "appId": "com.videomotion.desktop",
     "productName": "Video Motion",
     "asar": true,
-    "directories": { "output": "release" },
-    "files": ["dist/**", "electron/**", "package.json"],
-    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
@@ -49,7 +64,13 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },
-    "publish": [{ "provider": "github", "owner": "Samuklvm", "repo": "Video-Motion", "releaseType": "release" }
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Samuklvm",
+        "repo": "Video-Motion",
+        "releaseType": "release"
+      }
     ]
   }
 }
