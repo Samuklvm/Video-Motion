@@ -1,6 +1,6 @@
 {
   "name": "video-motion",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "private": true,
   "description": "A desktop video editor with a project library, animation timeline, effect controls, and Alight Motion project import compatibility.",

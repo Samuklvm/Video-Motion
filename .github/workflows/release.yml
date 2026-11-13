@@ -18,6 +18,16 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run release:win
+      - run: npm run build
+      - run: npx electron-builder --win nsis --publish never
+      - name: Publish complete release
+        shell: pwsh
+        run: |
+          $assets = @(Get-ChildItem release -File | Where-Object { $_.Name -match '\.(exe|blockmap)$' -or $_.Name -eq 'latest.yml' } | ForEach-Object { $_.FullName })
+          if ($assets.Count -ne 3) { throw 'Expected installer, blockmap and update metadata' }
+          gh release create $env:GITHUB_REF_NAME @assets --draft --title "Video Motion $env:GITHUB_REF_NAME" --notes "Versão inicial em desenvolvimento para Windows. Inclui projetos locais, timeline e curvas. Exportação de vídeo e paridade completa de efeitos ainda estão em desenvolvimento."
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+          gh release edit $env:GITHUB_REF_NAME --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
