@@ -38,6 +38,7 @@
   "build": {
     "appId": "com.videomotion.desktop",
     "productName": "Video Motion",
+    "artifactName": "Video-Motion-Setup-${version}.${ext}",
     "asar": true,
     "directories": {
       "output": "release"

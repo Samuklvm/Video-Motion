@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Keyframe, MotionLayer } from './types';
 
 type Curve = [number, number, number, number];
-const presets: Array<[string, Curve]> = [['Linear', [0,0,1,1]], ['Entrada', [.42,0,1,1]], ['Saída', [0,0,.58,1]], ['Suave', [.42,0,.58,1]]];
+const presets: Array<[string, Curve]> = [['Linear', [0,0,1,1]], ['Entrada', [.42,0,1,1]], ['Saída', [0,0,.58,1]], ['Suave', [.42,0,.58,1]], ['Entrada forte', [.7,0,1,1]], ['Saída forte', [0,0,.3,1]], ['Entrada rápida', [.1,.8,.2,1]], ['Saída lenta', [.2,0,.2,1]]];
 export function CurveEditor({ layer, playhead, onSeek, onChange }: { layer: MotionLayer; playhead: number; onSeek: (time: number) => void; onChange: (property: string, id: string, curve: Curve) => void }) {
   const properties = Object.keys(layer.transform).filter(key => (layer.keyframes[key]?.length ?? 0) >= 2);
   const [property, setProperty] = useState('x');
@@ -11,12 +11,18 @@ export function CurveEditor({ layer, playhead, onSeek, onChange }: { layer: Moti
   const index = Math.max(0, Math.min(frames.length-2, frames.reduce((result, frame, i) => frame.timeMs <= playhead ? i : result, 0)));
   const frame: Keyframe | undefined = frames[index];
   const curve: Curve = frame?.bezier ?? (frame?.easing === 'ease-in' ? [.42,0,1,1] : frame?.easing === 'ease-out' ? [0,0,.58,1] : frame?.easing === 'ease-in-out' ? [.42,0,.58,1] : [0,0,1,1]);
+  const [copied, setCopied] = useState<Curve | null>(null);
+  const [saved, setSaved] = useState<Array<[string, Curve]>>(() => {
+    try { const entries = JSON.parse(localStorage.getItem('vm.curvePresets') || '[]'); return Array.isArray(entries) ? entries.filter(entry => Array.isArray(entry) && typeof entry[0] === 'string' && Array.isArray(entry[1]) && entry[1].length === 4 && entry[1].every((n: unknown) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1)).slice(0,12) : []; } catch { return []; }
+  });
+  const [presetName, setPresetName] = useState('');
+  const [presetError, setPresetError] = useState('');
   const [drag, setDrag] = useState<number | null>(null);
   const update = (value: Curve) => { if (frame) onChange(active, frame.id, value); };
   return <section className="motion-curve-panel">
     <header><strong>Curva de velocidade</strong><span>◆</span></header>
     {!frame || frames.length < 2 ? <p>Adicione dois keyframes à mesma propriedade para editar a curva entre eles.</p> : <>
-      <div className="curve-navigation"><button disabled={index === 0} onClick={() => onSeek(frames[index-1].timeMs)}>‹</button><select aria-label="Propriedade animada" value={active} onChange={event => setProperty(event.target.value)}>{properties.map(key => <option key={key}>{key}</option>)}</select><button disabled={index >= frames.length-2} onClick={() => onSeek(frames[index+1].timeMs)}>›</button></div>
+      <div className="curve-navigation"><button disabled={index === 0} onClick={() => onSeek(frames[index-1].timeMs)}>‹</button><select aria-label="Propriedade animada" value={active} onChange={event => setProperty(event.target.value)}>{properties.map(key => <option key={key} value={key}>{{x:'Posição X',y:'Posição Y',scaleX:'Largura',scaleY:'Altura',rotation:'Rotação',opacity:'Opacidade'}[key] || key}</option>)}</select><button disabled={index >= frames.length-2} onClick={() => onSeek(frames[index+1].timeMs)}>›</button></div>
       <svg className="bezier-workspace" viewBox="0 0 240 240" aria-label="Editor de curva Bézier" onPointerMove={event => {
         if (drag === null) return;
         const rect = event.currentTarget.getBoundingClientRect();
@@ -30,7 +36,16 @@ export function CurveEditor({ layer, playhead, onSeek, onChange }: { layer: Moti
         {[0,1].map(handle => <g key={handle}><line x1={handle ? 220 : 20} y1={handle ? 20 : 220} x2={20+curve[handle*2]*200} y2={220-curve[handle*2+1]*200} className="curve-arm"/><circle cx={20+curve[handle*2]*200} cy={220-curve[handle*2+1]*200} r="9" className="curve-handle" onPointerDown={event => { event.preventDefault(); setDrag(handle); event.currentTarget.ownerSVGElement?.setPointerCapture(event.pointerId); }}/></g>)}
       </svg>
       <div className="curve-values">{curve.map((value,i) => <label key={i}>{['X₁','Y₁','X₂','Y₂'][i]}<input aria-label={['X1','Y1','X2','Y2'][i]} type="number" min="0" max="1" step="0.01" value={Number(value.toFixed(3))} onChange={event => { const next = [...curve] as Curve; next[i] = Math.max(0, Math.min(1, Number(event.target.value))); update(next); }}/></label>)}</div>
-      <div className="curve-presets">{presets.map(([label,value]) => <button key={label} onClick={() => update(value)}>{label}</button>)}</div>
+      <div className="curve-actions"><button onClick={() => setCopied([...curve])}>Copiar curva</button><button disabled={!copied} onClick={() => copied && update([...copied])}>Colar curva</button><button onClick={() => update([1-curve[2],1-curve[3],1-curve[0],1-curve[1]])}>Inverter</button></div>
+      <strong className="curve-subtitle">Presets de animação</strong>
+      <div className="curve-presets">{presets.map(([label,value]) => <button key={label} aria-pressed={value.every((n,i) => Math.abs(curve[i]-n)<.001)} onClick={() => update([...value])}><svg viewBox="0 0 80 44" aria-hidden="true"><path d={`M4 40 C${4+value[0]*72} ${40-value[1]*36} ${4+value[2]*72} ${40-value[3]*36} 76 4`}/></svg><span>{label}</span></button>)}</div>
+      <strong className="curve-subtitle">Meus presets</strong>
+      <div className="curve-save"><input aria-label="Nome do preset" placeholder="Nome da curva" maxLength={32} value={presetName} onChange={event => setPresetName(event.target.value)}/><button disabled={!presetName.trim() || saved.length >= 12} onClick={() => {
+        const next: Array<[string,Curve]> = [...saved, [presetName.trim(), [...curve]]];
+        try { localStorage.setItem('vm.curvePresets', JSON.stringify(next)); setSaved(next); setPresetName(''); setPresetError(''); } catch { setPresetError('Não foi possível salvar o preset neste computador.'); }
+      }}>Salvar</button></div>
+      {presetError && <p role="alert">{presetError}</p>}
+      {saved.map(([name,value],i) => <div className="saved-curve" key={i}><button onClick={() => update([...value])}>{name}</button><button aria-label={`Excluir preset ${name}`} onClick={() => { const next=saved.filter((_,index) => index!==i); try { localStorage.setItem('vm.curvePresets',JSON.stringify(next)); setSaved(next); } catch { setPresetError('Não foi possível excluir o preset.'); } }}>×</button></div>)}
       <small>{(frames[index].timeMs/1000).toFixed(2)} s → {(frames[index+1].timeMs/1000).toFixed(2)} s</small>
     </>}
   </section>;
