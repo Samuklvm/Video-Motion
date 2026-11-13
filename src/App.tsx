@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { parseAlightTransfer } from './alightImport';
 import JSZip from 'jszip';
+import { moveLayer, trimLayer, duplicateLayer } from './timeline';
 import type { EffectDefinition, EffectParameter, Keyframe, MotionEffect, MotionLayer, ProjectSummary, UpdateStatus, VideoProject } from './types';
 
 const desktop = window.videoMotion;
@@ -232,7 +233,7 @@ function App() {
       rightKeyframes[property] = [{ ...atCut, id: makeId() }, ...(rightKeyframes[property] || [])];
     }
     const left = { ...selectedLayer, endMs: playhead, keyframes: leftKeyframes };
-    const right = { ...selectedLayer, id: makeId(), name: `${selectedLayer.name} (2)`, startMs: playhead, keyframes: rightKeyframes };
+    const right = { ...trimLayer(selectedLayer, playhead, selectedLayer.endMs), id: makeId(), name: `${selectedLayer.name} (2)`, keyframes: rightKeyframes };
     commitProject({ ...project, layers: project.layers.map((layer) => layer.id === selectedLayer.id ? left : layer).concat(right) });
     setSelectedLayerId(right.id);
   };
@@ -279,7 +280,7 @@ function App() {
 
   return <main className="editor-shell">
     <header className="editor-topbar">
-      <button className="back-button" onClick={() => { setPlaying(false); setProject(null); setScreen('library'); void refreshProjects(); }}><ChevronLeft size={18} /><span>Projetos</span></button>
+      <button className="back-button" onClick={async () => { setPlaying(false); window.clearTimeout(saveTimer.current); try { await desktop?.saveProject(project); setProject(null); setScreen('library'); await refreshProjects(); } catch (error) { setNotice(`Falha ao salvar: ${String(error)}`); } }}><ChevronLeft size={18} /><span>Projetos</span></button>
       <div className="topbar-divider" />
       <div className="project-name"><strong>{project.title}</strong><ChevronDown size={14} /></div>
       <span className={`save-state ${saveState}`}><span className="save-dot" /> {saveState === 'saving' ? 'Salvando…' : saveState === 'error' ? 'Erro ao salvar' : 'Salvo'}</span>
@@ -341,7 +342,7 @@ function App() {
     </div>
 
     <section className="timeline-area">
-      <div className="timeline-toolbar"><div className="timeline-title"><Layers3 size={16} /><strong>Timeline</strong><span className="timeline-count">{project.layers.length} camadas</span></div><div className="timeline-actions"><button className="icon-button small" title="Dividir clipe no playhead" onClick={splitSelected} disabled={!selectedLayer || playhead <= selectedLayer.startMs || playhead >= selectedLayer.endMs}><Scissors size={15} /></button><button className="icon-button small" title="Duplicar selecionado" onClick={() => selectedLayer && commitProject({ ...project, layers: [...project.layers, { ...selectedLayer, id: makeId(), name: `${selectedLayer.name} cópia`, startMs: selectedLayer.endMs }] })}><Copy size={15} /></button><button className="icon-button small" title="Adicionar marcador"><Diamond size={15} /></button><span className="timeline-separator" /><button className="icon-button small" title="Diminuir zoom" onClick={() => setZoom(Math.max(0.35, zoom - 0.1))}><ZoomOut size={15} /></button><input aria-label="Zoom da timeline" type="range" min="0.35" max="2" step="0.05" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /><button className="icon-button small" title="Aumentar zoom" onClick={() => setZoom(Math.min(2, zoom + 0.1))}><ZoomIn size={15} /></button><button className="icon-button small" title="Opções"><MoreHorizontal size={16} /></button></div></div>
+      <div className="timeline-toolbar"><div className="timeline-title"><Layers3 size={16} /><strong>Timeline</strong><span className="timeline-count">{project.layers.length} camadas</span></div><div className="timeline-actions"><button className="icon-button small" title="Dividir clipe no playhead" onClick={splitSelected} disabled={!selectedLayer || playhead <= selectedLayer.startMs || playhead >= selectedLayer.endMs}><Scissors size={15} /></button><button className="icon-button small" title="Duplicar selecionado" onClick={() => selectedLayer && commitProject({ ...project, durationMs: Math.max(project.durationMs, selectedLayer.endMs + selectedLayer.endMs - selectedLayer.startMs), layers: [...project.layers, duplicateLayer(selectedLayer)] })}><Copy size={15} /></button><button className="icon-button small" title="Adicionar marcador"><Diamond size={15} /></button><span className="timeline-separator" /><button className="icon-button small" title="Diminuir zoom" onClick={() => setZoom(Math.max(0.35, zoom - 0.1))}><ZoomOut size={15} /></button><input aria-label="Zoom da timeline" type="range" min="0.35" max="2" step="0.05" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /><button className="icon-button small" title="Aumentar zoom" onClick={() => setZoom(Math.min(2, zoom + 0.1))}><ZoomIn size={15} /></button><button className="icon-button small" title="Opções"><MoreHorizontal size={16} /></button></div></div>
       <div className="timeline-scroll" onWheel={(event) => { if (event.ctrlKey) { event.preventDefault(); setZoom(Math.min(2, Math.max(0.35, zoom - event.deltaY / 1000))); } }}>
         <div className="timeline-content" style={{ width: `calc(204px + ${timelineWidth}px)` }}>
           <div className="timeline-ruler-row"><div className="track-label-ruler"><button className="secondary-button compact" onClick={() => void importMedia()}><Plus size={14} /> Faixa</button></div><div className="ruler" style={{ width: timelineWidth }} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setPlayhead(Math.max(0, Math.min(project.durationMs, (event.clientX - rect.left) / pxPerSecond * 1000))); }}>
@@ -349,7 +350,7 @@ function App() {
             <div className="ruler-playhead" style={{ left: playhead / 1000 * pxPerSecond }} />
           </div></div>
           <div className="track-list">
-            {project.layers.length ? [...project.layers].reverse().map((layer) => <TimelineTrack key={layer.id} layer={layer} selected={layer.id === selectedLayerId} playhead={playhead} durationMs={project.durationMs} pxPerSecond={pxPerSecond} onSelect={() => setSelectedLayerId(layer.id)} onSeek={setPlayhead} onMove={(startMs) => updateLayer(layer.id, (item) => ({ ...item, startMs, endMs: startMs + (item.endMs - item.startMs) }))} onTrim={(startMs, endMs) => updateLayer(layer.id, (item) => ({ ...item, startMs, endMs }))} onDelete={() => { commitProject({ ...project, layers: project.layers.filter((item) => item.id !== layer.id) }); if (selectedLayerId === layer.id) setSelectedLayerId(null); }} />) : <div className="empty-track"><span>Arraste mídia para cá ou use <b>+</b> para adicionar uma camada</span><button onClick={() => void importMedia()}><Plus size={14} /> Mídia</button><button onClick={() => addLayer('text')}><Type size={14} /> Texto</button><button onClick={() => addLayer('shape')}><Shapes size={14} /> Forma</button></div>}
+            {project.layers.length ? [...project.layers].reverse().map((layer) => <TimelineTrack key={layer.id} layer={layer} selected={layer.id === selectedLayerId} playhead={playhead} durationMs={project.durationMs} pxPerSecond={pxPerSecond} onSelect={() => setSelectedLayerId(layer.id)} onSeek={setPlayhead} onMove={(startMs) => updateLayer(layer.id, (item) => moveLayer(item, startMs))} onTrim={(startMs, endMs) => updateLayer(layer.id, (item) => trimLayer(item, startMs, endMs))} onDelete={() => { commitProject({ ...project, layers: project.layers.filter((item) => item.id !== layer.id) }); if (selectedLayerId === layer.id) setSelectedLayerId(null); }} />) : <div className="empty-track"><span>Arraste mídia para cá ou use <b>+</b> para adicionar uma camada</span><button onClick={() => void importMedia()}><Plus size={14} /> Mídia</button><button onClick={() => addLayer('text')}><Type size={14} /> Texto</button><button onClick={() => addLayer('shape')}><Shapes size={14} /> Forma</button></div>}
             <div className="timeline-playhead" style={{ left: `calc(204px + ${playhead / 1000 * pxPerSecond}px)` }} />
           </div>
         </div>
@@ -403,11 +404,11 @@ function PreviewLayer({ layer, projectId, playhead, playing, projectWidth, proje
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    const targetTime = Math.max(0, (playhead - layer.startMs) / 1000);
+    const targetTime = Math.max(0, (playhead - layer.startMs + (layer.sourceOffsetMs ?? 0)) / 1000);
     if (Math.abs(video.currentTime - targetTime) > (playing ? 0.35 : 0.04)) video.currentTime = targetTime;
     if (playing) void video.play().catch(() => undefined);
     else video.pause();
-  }, [playhead, playing, layer.startMs, source]);
+  }, [playhead, playing, layer.startMs, layer.sourceOffsetMs, source]);
   const transform = animatedTransform(layer, playhead);
   const scaleX = stageWidth / Math.max(1, projectWidth); const scaleY = stageHeight / Math.max(1, projectHeight);
   const style: CSSProperties = { transform: `translate(-50%, -50%) translate(${transform.x * scaleX}px, ${transform.y * scaleY}px) scale(${transform.scaleX}, ${transform.scaleY}) rotate(${transform.rotation}deg)`, opacity: transform.opacity, filter };

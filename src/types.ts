@@ -24,6 +24,7 @@ export interface MotionLayer {
   kind: LayerKind;
   startMs: number;
   endMs: number;
+  sourceOffsetMs?: number;
   assetPath?: string;
   assetKey?: string;
   sourceUri?: string;
