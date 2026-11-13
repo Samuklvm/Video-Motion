@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('videoMotion', {
   saveImportedProject: (project, assets) => ipcRenderer.invoke('projects:save-import', project, assets),
   importMedia: (id) => ipcRenderer.invoke('projects:import-media', id),
   readAsset: (id, relativePath) => ipcRenderer.invoke('projects:read-asset', id, relativePath),
+  readAssetData: (id, relativePath) => ipcRenderer.invoke('projects:read-asset-data', id, relativePath),
   appVersion: () => ipcRenderer.invoke('app:version'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
   downloadUpdate: () => ipcRenderer.invoke('updates:download'),

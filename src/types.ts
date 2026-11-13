@@ -106,6 +106,7 @@ declare global {
       saveImportedProject(project: VideoProject, assets: ImportedAsset[]): Promise<ProjectSummary>;
       importMedia(id: string): Promise<Array<{ assetPath: string; title: string; kind: LayerKind; bytes: number }>>;
       readAsset(id: string, relativePath: string): Promise<string>;
+      readAssetData(id: string, relativePath: string): Promise<string>;
       appVersion(): Promise<string>;
       checkForUpdates(): Promise<{ state: string; message?: string }>;
       downloadUpdate(): Promise<boolean>;

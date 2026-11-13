@@ -187,6 +187,11 @@ app.whenReady().then(async () => {
     await fs.access(resolved);
     return pathToFileURL(resolved).href;
   });
+  ipcMain.handle('projects:read-asset-data', async (_event, id, relativePath) => {
+    const { root, resolved } = await pathInAssets(id, relativePath);
+    if (!resolved.startsWith(root + path.sep)) throw new Error('Invalid asset path.');
+    return (await fs.readFile(resolved)).toString('base64');
+  });
   ipcMain.handle('updates:check', async () => {
     if (isDev) return { state: 'dev' };
     try { await autoUpdater.checkForUpdates(); return { state: 'checking' }; }

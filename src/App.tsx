@@ -34,6 +34,8 @@ function newLayer(kind: MotionLayer['kind'], timeMs: number, durationMs: number,
 function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [project, setProject] = useState<VideoProject | null>(null);
+  const [undoStack, setUndoStack] = useState<VideoProject[]>([]);
+  const [redoStack, setRedoStack] = useState<VideoProject[]>([]);
   const [screen, setScreen] = useState<'library' | 'editor'>('library');
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [playhead, setPlayhead] = useState(0);
@@ -54,6 +56,35 @@ function App() {
   const [previewStageSize, setPreviewStageSize] = useState({ width: 0, height: 0 });
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const saveTimer = useRef<number | undefined>(undefined);
+  const lastHistoryAt = useRef(0);
+
+  const commitProject = (next: VideoProject) => {
+    if (project) {
+      const now = Date.now();
+      if (now - lastHistoryAt.current > 250) setUndoStack((stack) => [...stack.slice(-79), structuredClone(project)]);
+      lastHistoryAt.current = now;
+      setRedoStack([]);
+    }
+    setProject(next);
+  };
+
+  const undo = () => {
+    const previous = undoStack.at(-1);
+    if (!previous || !project) return;
+    setRedoStack((stack) => [...stack.slice(-79), structuredClone(project)]);
+    setUndoStack((stack) => stack.slice(0, -1));
+    lastHistoryAt.current = 0;
+    setProject(previous);
+  };
+
+  const redo = () => {
+    const next = redoStack.at(-1);
+    if (!next || !project) return;
+    setUndoStack((stack) => [...stack.slice(-79), structuredClone(project)]);
+    setRedoStack((stack) => stack.slice(0, -1));
+    lastHistoryAt.current = 0;
+    setProject(next);
+  };
 
   const refreshProjects = useCallback(async () => {
     if (!desktop) return;
@@ -105,6 +136,7 @@ function App() {
     if (!desktop) return setNotice('Abra Video Motion no aplicativo para acessar arquivos locais.');
     try {
       const loaded = await desktop.readProject(id);
+      setUndoStack([]); setRedoStack([]); lastHistoryAt.current = 0;
       setProject(loaded); setSelectedLayerId(loaded.layers[0]?.id || null); setPlayhead(0); setScreen('editor');
     } catch (error) { setNotice(`Não consegui abrir o projeto: ${String(error)}`); }
   };
@@ -132,12 +164,12 @@ function App() {
   const addLayer = (kind: MotionLayer['kind'], title?: string, assetPath?: string) => {
     if (!project) return;
     const layer = newLayer(kind, playhead, project.durationMs, title, assetPath);
-    setProject({ ...project, layers: [...project.layers, layer] }); setSelectedLayerId(layer.id);
+    commitProject({ ...project, layers: [...project.layers, layer] }); setSelectedLayerId(layer.id);
   };
 
   const updateLayer = (id: string, updateFn: (layer: MotionLayer) => MotionLayer) => {
     if (!project) return;
-    setProject({ ...project, layers: project.layers.map((layer) => layer.id === id ? updateFn(layer) : layer) });
+    commitProject({ ...project, layers: project.layers.map((layer) => layer.id === id ? updateFn(layer) : layer) });
   };
 
   const changeTransform = (key: keyof MotionLayer['transform'], value: number) => {
@@ -168,7 +200,7 @@ function App() {
       const imported = await desktop.importMedia(project.id);
       if (!imported.length) return;
       const newLayers = imported.map((asset, index) => newLayer(asset.kind, playhead + index * 1000, project.durationMs, asset.title, asset.assetPath));
-      setProject({ ...project, layers: [...project.layers, ...newLayers] });
+      commitProject({ ...project, layers: [...project.layers, ...newLayers] });
       setSelectedLayerId(newLayers.at(-1)?.id || null);
     } catch (error) { setNotice(`Erro ao adicionar mídia: ${String(error)}`); }
   };
@@ -180,7 +212,7 @@ function App() {
 
   const removeSelected = () => {
     if (!project || !selectedLayer) return;
-    setProject({ ...project, layers: project.layers.filter((layer) => layer.id !== selectedLayer.id) });
+    commitProject({ ...project, layers: project.layers.filter((layer) => layer.id !== selectedLayer.id) });
     setSelectedLayerId(null);
   };
 
@@ -201,7 +233,7 @@ function App() {
     }
     const left = { ...selectedLayer, endMs: playhead, keyframes: leftKeyframes };
     const right = { ...selectedLayer, id: makeId(), name: `${selectedLayer.name} (2)`, startMs: playhead, keyframes: rightKeyframes };
-    setProject({ ...project, layers: project.layers.map((layer) => layer.id === selectedLayer.id ? left : layer).concat(right) });
+    commitProject({ ...project, layers: project.layers.map((layer) => layer.id === selectedLayer.id ? left : layer).concat(right) });
     setSelectedLayerId(right.id);
   };
 
@@ -252,7 +284,7 @@ function App() {
       <div className="project-name"><strong>{project.title}</strong><ChevronDown size={14} /></div>
       <span className={`save-state ${saveState}`}><span className="save-dot" /> {saveState === 'saving' ? 'Salvando…' : saveState === 'error' ? 'Erro ao salvar' : 'Salvo'}</span>
       <div className="topbar-spacer" />
-      <button className="icon-button" title="Desfazer"><Undo2 size={17} /></button><button className="icon-button" title="Refazer"><Redo2 size={17} /></button>
+      <button className="icon-button" title="Desfazer" onClick={undo} disabled={!undoStack.length}><Undo2 size={17} /></button><button className="icon-button" title="Refazer" onClick={redo} disabled={!redoStack.length}><Redo2 size={17} /></button>
       <button className="secondary-button compact" onClick={exportProjectFile}><Download size={16} /> Salvar cópia</button>
       <button className="primary-button compact" onClick={() => setNotice('A exportação de vídeo ainda está sendo construída; o projeto local está salvo e já pode ser exportado como .vmproj.')}><Upload size={15} /> Exportar</button>
     </header>
@@ -309,7 +341,7 @@ function App() {
     </div>
 
     <section className="timeline-area">
-      <div className="timeline-toolbar"><div className="timeline-title"><Layers3 size={16} /><strong>Timeline</strong><span className="timeline-count">{project.layers.length} camadas</span></div><div className="timeline-actions"><button className="icon-button small" title="Dividir clipe no playhead" onClick={splitSelected} disabled={!selectedLayer || playhead <= selectedLayer.startMs || playhead >= selectedLayer.endMs}><Scissors size={15} /></button><button className="icon-button small" title="Duplicar selecionado" onClick={() => selectedLayer && setProject({ ...project, layers: [...project.layers, { ...selectedLayer, id: makeId(), name: `${selectedLayer.name} cópia`, startMs: selectedLayer.endMs }] })}><Copy size={15} /></button><button className="icon-button small" title="Adicionar marcador"><Diamond size={15} /></button><span className="timeline-separator" /><button className="icon-button small" title="Diminuir zoom" onClick={() => setZoom(Math.max(0.35, zoom - 0.1))}><ZoomOut size={15} /></button><input aria-label="Zoom da timeline" type="range" min="0.35" max="2" step="0.05" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /><button className="icon-button small" title="Aumentar zoom" onClick={() => setZoom(Math.min(2, zoom + 0.1))}><ZoomIn size={15} /></button><button className="icon-button small" title="Opções"><MoreHorizontal size={16} /></button></div></div>
+      <div className="timeline-toolbar"><div className="timeline-title"><Layers3 size={16} /><strong>Timeline</strong><span className="timeline-count">{project.layers.length} camadas</span></div><div className="timeline-actions"><button className="icon-button small" title="Dividir clipe no playhead" onClick={splitSelected} disabled={!selectedLayer || playhead <= selectedLayer.startMs || playhead >= selectedLayer.endMs}><Scissors size={15} /></button><button className="icon-button small" title="Duplicar selecionado" onClick={() => selectedLayer && commitProject({ ...project, layers: [...project.layers, { ...selectedLayer, id: makeId(), name: `${selectedLayer.name} cópia`, startMs: selectedLayer.endMs }] })}><Copy size={15} /></button><button className="icon-button small" title="Adicionar marcador"><Diamond size={15} /></button><span className="timeline-separator" /><button className="icon-button small" title="Diminuir zoom" onClick={() => setZoom(Math.max(0.35, zoom - 0.1))}><ZoomOut size={15} /></button><input aria-label="Zoom da timeline" type="range" min="0.35" max="2" step="0.05" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /><button className="icon-button small" title="Aumentar zoom" onClick={() => setZoom(Math.min(2, zoom + 0.1))}><ZoomIn size={15} /></button><button className="icon-button small" title="Opções"><MoreHorizontal size={16} /></button></div></div>
       <div className="timeline-scroll" onWheel={(event) => { if (event.ctrlKey) { event.preventDefault(); setZoom(Math.min(2, Math.max(0.35, zoom - event.deltaY / 1000))); } }}>
         <div className="timeline-content" style={{ width: `calc(204px + ${timelineWidth}px)` }}>
           <div className="timeline-ruler-row"><div className="track-label-ruler"><button className="secondary-button compact" onClick={() => void importMedia()}><Plus size={14} /> Faixa</button></div><div className="ruler" style={{ width: timelineWidth }} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setPlayhead(Math.max(0, Math.min(project.durationMs, (event.clientX - rect.left) / pxPerSecond * 1000))); }}>
@@ -317,12 +349,12 @@ function App() {
             <div className="ruler-playhead" style={{ left: playhead / 1000 * pxPerSecond }} />
           </div></div>
           <div className="track-list">
-            {project.layers.length ? [...project.layers].reverse().map((layer) => <TimelineTrack key={layer.id} layer={layer} selected={layer.id === selectedLayerId} playhead={playhead} durationMs={project.durationMs} pxPerSecond={pxPerSecond} onSelect={() => setSelectedLayerId(layer.id)} onSeek={setPlayhead} onMove={(startMs) => updateLayer(layer.id, (item) => ({ ...item, startMs, endMs: startMs + (item.endMs - item.startMs) }))} onTrim={(startMs, endMs) => updateLayer(layer.id, (item) => ({ ...item, startMs, endMs }))} onDelete={() => { setProject({ ...project, layers: project.layers.filter((item) => item.id !== layer.id) }); if (selectedLayerId === layer.id) setSelectedLayerId(null); }} />) : <div className="empty-track"><span>Arraste mídia para cá ou use <b>+</b> para adicionar uma camada</span><button onClick={() => void importMedia()}><Plus size={14} /> Mídia</button><button onClick={() => addLayer('text')}><Type size={14} /> Texto</button><button onClick={() => addLayer('shape')}><Shapes size={14} /> Forma</button></div>}
+            {project.layers.length ? [...project.layers].reverse().map((layer) => <TimelineTrack key={layer.id} layer={layer} selected={layer.id === selectedLayerId} playhead={playhead} durationMs={project.durationMs} pxPerSecond={pxPerSecond} onSelect={() => setSelectedLayerId(layer.id)} onSeek={setPlayhead} onMove={(startMs) => updateLayer(layer.id, (item) => ({ ...item, startMs, endMs: startMs + (item.endMs - item.startMs) }))} onTrim={(startMs, endMs) => updateLayer(layer.id, (item) => ({ ...item, startMs, endMs }))} onDelete={() => { commitProject({ ...project, layers: project.layers.filter((item) => item.id !== layer.id) }); if (selectedLayerId === layer.id) setSelectedLayerId(null); }} />) : <div className="empty-track"><span>Arraste mídia para cá ou use <b>+</b> para adicionar uma camada</span><button onClick={() => void importMedia()}><Plus size={14} /> Mídia</button><button onClick={() => addLayer('text')}><Type size={14} /> Texto</button><button onClick={() => addLayer('shape')}><Shapes size={14} /> Forma</button></div>}
             <div className="timeline-playhead" style={{ left: `calc(204px + ${playhead / 1000 * pxPerSecond}px)` }} />
           </div>
         </div>
       </div>
-      <div className="timeline-bottom"><span>{project.fps} fps</span><span>·</span><span>{formatClock(project.durationMs, project.fps)}</span><div className="timeline-bottom-spacer" /><button className="text-button" onClick={() => setProject({ ...project, durationMs: project.durationMs + 5000 })}><Plus size={14} /> Aumentar duração</button></div>
+      <div className="timeline-bottom"><span>{project.fps} fps</span><span>·</span><span>{formatClock(project.durationMs, project.fps)}</span><div className="timeline-bottom-spacer" /><button className="text-button" onClick={() => commitProject({ ...project, durationMs: project.durationMs + 5000 })}><Plus size={14} /> Aumentar duração</button></div>
     </section>
     <UpdateToast update={update} onDownload={() => void desktop?.downloadUpdate()} onInstall={() => void desktop?.installUpdate()} onClose={() => setUpdate(null)} />
     <Notice message={notice} onClose={() => setNotice('')} />
@@ -401,7 +433,7 @@ function EffectInspector({ effect, catalog, onChange, onRemove }: { effect: Moti
   const definition = catalog.find((item) => item.id === effect.effectId);
   const parameters = definition ? safeParseParameters(definition.parameters_json) : [];
   return <div className="effect-inspector"><div className="effect-inspector-head"><span className="effect-mini-thumb">{effect.preview ? <img src={`./previews/effects/${effect.preview}`} /> : <Sparkles size={13} />}</span><strong>{effect.name}</strong><button className="icon-button tiny" onClick={() => onChange({ ...effect, enabled: !effect.enabled })} title={effect.enabled ? 'Desativar efeito' : 'Ativar efeito'}><Eye size={13} /></button><button className="icon-button tiny" onClick={onRemove} title="Remover efeito"><X size={13} /></button></div>
-    {parameters.slice(0, 8).map((parameter) => <EffectParameterControl key={parameter.id} parameter={parameter} value={effect.parameters[parameter.id]} onChange={(value) => onChange({ ...effect, parameters: { ...effect.parameters, [parameter.id]: value } })} />)}
+    {parameters.map((parameter) => <EffectParameterControl key={parameter.id} parameter={parameter} value={effect.parameters[parameter.id]} onChange={(value) => onChange({ ...effect, parameters: { ...effect.parameters, [parameter.id]: value } })} />)}
     {effect.compatibility === 'metadata-only' && <div className="compatibility-note">Controle recuperado · renderização ainda indisponível</div>}
   </div>;
 }
@@ -409,12 +441,18 @@ function EffectInspector({ effect, catalog, onChange, onRemove }: { effect: Moti
 function EffectParameterControl({ parameter, value, onChange }: { parameter: EffectParameter; value: MotionEffect['parameters'][string]; onChange: (value: string | number | boolean | number[]) => void }) {
   if (parameter.kind === 'tip' || parameter.kind === 'section') return null;
   const numeric = Number((value ?? parameter.default) || 0);
+  if (['point', 'xyz', 'orient'].includes(parameter.kind)) {
+    const count = parameter.kind === 'point' ? 2 : 3;
+    const vector = Array.isArray(value) ? value : Array.from({ length: count }, (_, index) => Number(parameter.default.split(',')[index]) || 0);
+    return <div className="effect-parameter"><span>{parameter.label || parameter.id}</span><div className="effect-vector">{vector.slice(0, count).map((axis, index) => <label key={index}><small>{parameter.kind === 'point' ? ['X', 'Y'][index] : ['X', 'Y', 'Z'][index]}</small><input type="number" step="0.1" value={Number(axis) || 0} onChange={(event) => { const next = [...vector]; next[index] = Number(event.target.value); onChange(next); }} /></label>)}</div></div>;
+  }
   if (parameter.kind === 'switch') return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} /></label>;
   if (parameter.kind === 'selector' || parameter.kind === 'spinner') {
     const choices = parameter.choices.map((choice) => choice.split('='));
     return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><select value={String(value ?? parameter.default)} onChange={(event) => onChange(event.target.value)}>{choices.length ? choices.map(([label, option]) => <option key={option} value={option}>{label}</option>) : <option value={String(value ?? parameter.default)}>{String(value ?? parameter.default)}</option>}</select></label>;
   }
   if (parameter.kind === 'color') return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><input type="color" value={/^#[\da-f]{6}$/i.test(String(value)) ? String(value) : '#ffffff'} onChange={(event) => onChange(event.target.value)} /></label>;
+  if (parameter.kind === 'hue-disc') return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><input type="color" value={/^#[\da-f]{6}$/i.test(String(value)) ? String(value) : '#ff4f9a'} onChange={(event) => onChange(event.target.value)} /></label>;
   if (parameter.kind === 'tip' || parameter.kind === 'section') return null;
   const min = Number(parameter.min || 0); const max = Number(parameter.max || 100);
   return <label className="effect-parameter slider-parameter"><span>{parameter.label || parameter.id}<b>{numeric.toFixed(2)}</b></span><input type="range" min={min} max={max} step={Number(parameter.step || 0.01)} value={numeric} onChange={(event) => onChange(Number(event.target.value))} /></label>;
@@ -440,6 +478,9 @@ function parseEffectParameters(effect: EffectDefinition) {
   return Object.fromEntries(safeParseParameters(effect.parameters_json).map((parameter) => {
     const value = parameter.default;
     if (parameter.kind === 'switch') return [parameter.id, value === 'true' || value === '1'];
+    if (parameter.kind === 'point') return [parameter.id, [0, 0]];
+    if (parameter.kind === 'xyz' || parameter.kind === 'orient') return [parameter.id, [0, 0, 0]];
+    if (parameter.kind === 'hue-disc') return [parameter.id, '#ff4f9a'];
     if (value === '') return [parameter.id, 0];
     return [parameter.id, Number.isFinite(Number(value)) ? Number(value) : value];
   }));
@@ -463,15 +504,21 @@ function animatedTransform(layer: MotionLayer, timeMs: number): MotionLayer['tra
   }
   return output;
 }
-function isNativeCssEffect(id: string) { return /blur|brightness|contrast|saturation|vibrance|hue|opacity/i.test(id); }
+function isNativeCssEffect(id: string) { return /blur|brightness|contrast|saturation|vibrance|hue|opacity|grayscale|greyscale|sepia|invert/i.test(id); }
 function cssFilterForEffect(effect: MotionEffect) {
   if (!effect.enabled) return '';
-  const name = effect.effectId.toLowerCase(); const values = Object.values(effect.parameters).map(Number); const first = Number.isFinite(values[0]) ? values[0] : 1;
+  const name = effect.effectId.toLowerCase();
+  const preferred = Object.entries(effect.parameters).find(([key, value]) => /amount|strength|value|radius|intensity|level/i.test(key) && typeof value === 'number')?.[1];
+  const first = Number(preferred ?? Object.values(effect.parameters).find((value) => typeof value === 'number') ?? 1);
   if (name.includes('blur')) return `blur(${Math.max(0, first)}px)`;
   if (name.includes('brightness')) return `brightness(${Math.max(0, first)} )`;
   if (name.includes('contrast')) return `contrast(${Math.max(0, first)} )`;
   if (name.includes('saturation') || name.includes('vibrance')) return `saturate(${Math.max(0, first)} )`;
   if (name.includes('hue')) return `hue-rotate(${first}deg)`;
+  if (name.includes('grayscale') || name.includes('greyscale')) return `grayscale(${Math.max(0, Math.min(1, first))})`;
+  if (name.includes('sepia')) return `sepia(${Math.max(0, Math.min(1, first))})`;
+  if (name.includes('invert')) return `invert(${Math.max(0, Math.min(1, first))})`;
+  if (name.includes('opacity')) return `opacity(${Math.max(0, Math.min(1, first))})`;
   return '';
 }
 function panelTitle(panel: string) { return ({ effects: 'Efeitos', media: 'Mídia', text: 'Texto', layers: 'Camadas' } as Record<string, string>)[panel] || panel; }
@@ -485,8 +532,8 @@ async function exportPortableProject(project: VideoProject) {
     if (!layer.assetPath || !desktop || seen.has(layer.assetPath)) continue;
     seen.add(layer.assetPath);
     try {
-      const dataUrl = await desktop.readAsset(project.id, layer.assetPath);
-      archive.file(`assets/${layer.assetPath}`, dataUrl.slice(dataUrl.indexOf(',') + 1), { base64: true });
+      const base64 = await desktop.readAssetData(project.id, layer.assetPath);
+      archive.file(`assets/${layer.assetPath}`, base64, { base64: true });
     } catch { /* Keep a project reference when the source asset is unavailable. */ }
   }
   const blob = await archive.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 4 } });
