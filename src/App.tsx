@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { parseAlightTransfer } from './alightImport';
 import JSZip from 'jszip';
+import { CurveEditor } from './CurveEditor';
+import { cubicBezier } from './bezier';
 import { moveLayer, trimLayer, duplicateLayer } from './timeline';
 import type { EffectDefinition, EffectParameter, Keyframe, MotionEffect, MotionLayer, ProjectSummary, UpdateStatus, VideoProject } from './types';
 
@@ -52,6 +54,7 @@ function App() {
   const [panel, setPanel] = useState<'media' | 'effects' | 'text' | 'layers'>('effects');
   const [zoom, setZoom] = useState(1);
   const [showKeyframes, setShowKeyframes] = useState(false);
+  const [linkScale, setLinkScale] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
   const previewStageRef = useRef<HTMLDivElement>(null);
   const [previewStageSize, setPreviewStageSize] = useState({ width: 0, height: 0 });
@@ -175,7 +178,19 @@ function App() {
 
   const changeTransform = (key: keyof MotionLayer['transform'], value: number) => {
     if (!selectedLayer) return;
-    updateLayer(selectedLayer.id, (layer) => ({ ...layer, transform: { ...layer.transform, [key]: value } }));
+    updateLayer(selectedLayer.id, layer => {
+      const keys = linkScale && (key === 'scaleX' || key === 'scaleY') ? ['scaleX', 'scaleY'] as const : [key];
+      const next = structuredClone(layer);
+      for (const property of keys) {
+        next.transform[property] = value;
+        if (next.keyframes[property]?.length) {
+          const existing = next.keyframes[property].find(frame => Math.abs(frame.timeMs-playhead) < 1);
+          if (existing) existing.value = value;
+          else next.keyframes[property].push({ id: makeId(), timeMs: playhead, value, easing: 'linear' });
+        }
+      }
+      return next;
+    });
   };
 
   const toggleKeyframe = (property: keyof MotionLayer['transform']) => {
@@ -330,13 +345,13 @@ function App() {
           <div className="property-section"><div className="section-heading"><strong>Transformar</strong><button className="icon-button small"><RotateCcw size={14} /></button></div>
             <TransformField label="Posição X" value={selectedLayer.transform.x} suffix="px" onChange={(v) => changeTransform('x', v)} onKeyframe={() => toggleKeyframe('x')} active={Boolean(selectedLayer.keyframes.x?.some((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1))} />
             <TransformField label="Posição Y" value={selectedLayer.transform.y} suffix="px" onChange={(v) => changeTransform('y', v)} onKeyframe={() => toggleKeyframe('y')} active={Boolean(selectedLayer.keyframes.y?.some((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1))} />
-            <TransformField label="Escala" value={selectedLayer.transform.scaleX * 100} suffix="%" onChange={(v) => updateLayer(selectedLayer.id, (layer) => ({ ...layer, transform: { ...layer.transform, scaleX: v / 100, scaleY: v / 100 } }))} onKeyframe={() => toggleKeyframe('scaleX')} active={Boolean(selectedLayer.keyframes.scaleX?.some((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1))} />
+            <div className="motion-size-panel"><header><strong>Tamanho</strong><button aria-pressed={linkScale} onClick={() => setLinkScale(!linkScale)}>{linkScale ? '🔗 Vinculado' : 'Desvinculado'}</button></header>{(['scaleX', 'scaleY'] as const).map((key, index) => <div key={key}><TransformField label={index === 0 ? 'Largura' : 'Altura'} value={animatedTransform(selectedLayer, playhead)[key] * 100} suffix="%" onChange={value => changeTransform(key, value / 100)} onKeyframe={() => toggleKeyframe(key)} active={Boolean(selectedLayer.keyframes[key]?.some(frame => Math.abs(frame.timeMs-playhead) < 1))}/><input aria-label={index === 0 ? 'Escala horizontal' : 'Escala vertical'} type="range" min="1" max="400" step="0.1" value={animatedTransform(selectedLayer, playhead)[key] * 100} onChange={event => changeTransform(key, Number(event.target.value)/100)}/></div>)}</div>
             <TransformField label="Rotação" value={selectedLayer.transform.rotation} suffix="°" onChange={(v) => changeTransform('rotation', v)} onKeyframe={() => toggleKeyframe('rotation')} active={Boolean(selectedLayer.keyframes.rotation?.some((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1))} />
             <TransformField label="Opacidade" value={selectedLayer.transform.opacity * 100} suffix="%" onChange={(v) => changeTransform('opacity', v / 100)} onKeyframe={() => toggleKeyframe('opacity')} active={Boolean(selectedLayer.keyframes.opacity?.some((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1))} />
           </div>
           {selectedLayer.kind === 'text' && <div className="property-section"><div className="section-heading"><strong>Texto</strong><Type size={14} /></div><textarea className="text-input" value={selectedLayer.text || ''} onChange={(event) => updateLayer(selectedLayer.id, (layer) => ({ ...layer, text: event.target.value }))} /><div className="text-style-row"><button className="secondary-button compact">Roboto <ChevronDown size={13} /></button><button className="secondary-button compact">24 px <ChevronDown size={13} /></button><button className="icon-button small"><Star size={15} /></button></div></div>}
           {selectedLayer.effects.length > 0 && <div className="property-section"><div className="section-heading"><strong>Efeitos</strong><span className="mini-count">{selectedLayer.effects.length}</span><button className="icon-button small" onClick={() => setPanel('effects')}><Plus size={14} /></button></div>{selectedLayer.effects.map((effect) => <EffectInspector key={effect.id} effect={effect} catalog={catalog} onChange={(next) => updateLayer(selectedLayer.id, (layer) => ({ ...layer, effects: layer.effects.map((item) => item.id === next.id ? next : item) }))} onRemove={() => updateLayer(selectedLayer.id, (layer) => ({ ...layer, effects: layer.effects.filter((item) => item.id !== effect.id) }))} />)}</div>}
-          {showKeyframes && <KeyframeEditor layer={selectedLayer} playhead={playhead} durationMs={project.durationMs} onSeek={setPlayhead} onEasing={(property, keyframeId, easing) => updateLayer(selectedLayer.id, (layer) => ({ ...layer, keyframes: { ...layer.keyframes, [property]: layer.keyframes[property].map((keyframe) => keyframe.id === keyframeId ? { ...keyframe, easing } : keyframe) } }))} />}
+          {showKeyframes && <CurveEditor layer={selectedLayer} playhead={playhead} onSeek={setPlayhead} onChange={(property, id, bezier) => updateLayer(selectedLayer.id, layer => ({ ...layer, keyframes: { ...layer.keyframes, [property]: layer.keyframes[property].map(frame => frame.id === id ? { ...frame, easing: 'cubic-bezier', bezier } : frame) } }))} />}
         </> : <div className="project-inspector"><span className="large-project-icon"><Film size={22} /></span><h3>Configurações do projeto</h3><p>{project.width} × {project.height} · {project.fps} quadros/s</p><button className="secondary-button full-width" onClick={() => void importMedia()}><Plus size={16} /> Adicionar mídia</button><button className="secondary-button full-width" onClick={() => addLayer('text')}><Type size={16} /> Adicionar texto</button></div>}
       </aside>
     </div>
@@ -422,14 +437,6 @@ function TransformField({ label, value, suffix, onChange, onKeyframe, active }: 
   return <label className="transform-row"><span>{label}</span><input type="number" value={Number.isInteger(value) ? value : Number(value.toFixed(3))} onChange={(event) => onChange(Number(event.target.value))} /><small>{suffix}</small><button type="button" className={active ? 'key-toggle active' : 'key-toggle'} onClick={onKeyframe} title="Adicionar/remover keyframe"><Diamond size={13} fill={active ? 'currentColor' : 'none'} /></button></label>;
 }
 
-function KeyframeEditor({ layer, playhead, durationMs, onSeek, onEasing }: { layer: MotionLayer; playhead: number; durationMs: number; onSeek: (time: number) => void; onEasing: (property: string, keyframeId: string, easing: Keyframe['easing']) => void }) {
-  const curves = Object.entries(layer.keyframes).filter(([, keyframes]) => keyframes.length);
-  return <div className="property-section keyframe-editor"><div className="section-heading"><strong>Keyframes & curvas</strong><span className="mini-count">{curves.reduce((sum, [, values]) => sum + values.length, 0)}</span></div>
-    {!curves.length ? <p className="muted-note">Use o diamante ao lado de uma propriedade para criar keyframes no ponto atual.</p> : curves.map(([property, keyframes]) => <div className="keyframe-property" key={property}><div className="keyframe-property-name">{property}</div><div className="keyframe-line">{keyframes.map((keyframe) => <button key={keyframe.id} style={{ left: `${Math.max(0, Math.min(100, (keyframe.timeMs / Math.max(1, durationMs)) * 100))}%` }} onClick={() => onSeek(keyframe.timeMs)} title={formatClock(keyframe.timeMs)}><Diamond size={12} fill="currentColor" /></button>)}</div><select value={keyframes.find((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1)?.easing || 'linear'} onChange={(event) => { const target = keyframes.reduce((best, keyframe) => Math.abs(keyframe.timeMs - playhead) < Math.abs(best.timeMs - playhead) ? keyframe : best, keyframes[0]); onEasing(property, target.id, event.target.value as Keyframe['easing']); }}><option value="linear">Linear</option><option value="ease-in">Ease in</option><option value="ease-out">Ease out</option><option value="ease-in-out">Ease in/out</option><option value="step">Step</option></select></div>)}
-    <div className="curve-preview"><svg viewBox="0 0 180 64" role="img" aria-label="Curva de animação"><path d="M 4 56 C 48 56 42 8 88 8 S 132 56 176 8" /><line x1="4" y1="60" x2="176" y2="60" /><line x1="4" y1="4" x2="4" y2="60" /></svg><span>Prévia da curva de interpolação</span></div>
-  </div>;
-}
-
 function EffectInspector({ effect, catalog, onChange, onRemove }: { effect: MotionEffect; catalog: EffectDefinition[]; onChange: (effect: MotionEffect) => void; onRemove: () => void }) {
   const definition = catalog.find((item) => item.id === effect.effectId);
   const parameters = definition ? safeParseParameters(definition.parameters_json) : [];
@@ -497,7 +504,8 @@ function animatedTransform(layer: MotionLayer, timeMs: number): MotionLayer['tra
     const rightIndex = sorted.findIndex((keyframe) => keyframe.timeMs >= timeMs);
     const left = sorted[rightIndex - 1]; const right = sorted[rightIndex];
     let amount = (timeMs - left.timeMs) / Math.max(1, right.timeMs - left.timeMs);
-    if (left.easing === 'ease-in') amount *= amount;
+    if (left.easing === 'cubic-bezier' && left.bezier) amount = cubicBezier(amount, left.bezier);
+    else if (left.easing === 'ease-in') amount *= amount;
     else if (left.easing === 'ease-out') amount = 1 - (1 - amount) ** 2;
     else if (left.easing === 'ease-in-out') amount = amount * amount * (3 - 2 * amount);
     else if (left.easing === 'step') amount = 0;

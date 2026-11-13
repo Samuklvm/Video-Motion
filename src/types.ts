@@ -1,11 +1,12 @@
 export type LayerKind = 'video' | 'image' | 'audio' | 'text' | 'shape';
-export type Easing = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'step';
+export type Easing = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'step' | 'cubic-bezier';
 
 export interface Keyframe {
   id: string;
   timeMs: number;
   value: number | string | boolean | number[];
   easing: Easing;
+  bezier?: [number, number, number, number];
 }
 
 export interface MotionEffect {
