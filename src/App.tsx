@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { parseAlightTransfer } from './alightImport';
 import JSZip from 'jszip';
+import { AudioPreview } from './AudioPreview';
 import { CurveEditor } from './CurveEditor';
 import { cubicBezier } from './bezier';
 import { moveLayer, trimLayer, duplicateLayer } from './timeline';
@@ -124,11 +125,15 @@ function App() {
 
   useEffect(() => {
     if (!playing || !project) return;
-    const timer = window.setInterval(() => setPlayhead((current) => {
-      const next = current + 1000 / project.fps;
-      if (next >= project.durationMs) { setPlaying(false); return 0; }
-      return next;
-    }), 1000 / project.fps);
+    let last = performance.now();
+    const timer = window.setInterval(() => {
+      const now = performance.now(); const elapsed = now-last; last = now;
+      setPlayhead(current => {
+        const next = current+elapsed;
+        if (next >= project.durationMs) { setPlaying(false); return 0; }
+        return next;
+      });
+    }, 1000 / project.fps);
     return () => window.clearInterval(timer);
   }, [playing, project]);
 
@@ -179,14 +184,17 @@ function App() {
   const changeTransform = (key: keyof MotionLayer['transform'], value: number) => {
     if (!selectedLayer) return;
     updateLayer(selectedLayer.id, layer => {
+      const before = animatedTransform(layer, playhead);
+      const ratio = before[key] === 0 ? 1 : value / before[key];
       const keys = linkScale && (key === 'scaleX' || key === 'scaleY') ? ['scaleX', 'scaleY'] as const : [key];
       const next = structuredClone(layer);
       for (const property of keys) {
-        next.transform[property] = value;
+        const adjusted = property === key ? value : before[property] * ratio;
+        next.transform[property] = adjusted;
         if (next.keyframes[property]?.length) {
           const existing = next.keyframes[property].find(frame => Math.abs(frame.timeMs-playhead) < 1);
-          if (existing) existing.value = value;
-          else next.keyframes[property].push({ id: makeId(), timeMs: playhead, value, easing: 'linear' });
+          if (existing) existing.value = adjusted;
+          else next.keyframes[property].push({ id: makeId(), timeMs: playhead, value: adjusted, easing: 'linear' });
         }
       }
       return next;
@@ -195,11 +203,17 @@ function App() {
 
   const toggleKeyframe = (property: keyof MotionLayer['transform']) => {
     if (!selectedLayer) return;
-    const current = selectedLayer.transform[property];
-    const list = selectedLayer.keyframes[property] || [];
-    const existing = list.find((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1);
-    const next = existing ? list.filter((keyframe) => keyframe.id !== existing.id) : [...list, { id: makeId(), timeMs: playhead, value: current, easing: 'linear' as const }].sort((a, b) => a.timeMs - b.timeMs);
-    updateLayer(selectedLayer.id, (layer) => ({ ...layer, keyframes: { ...layer.keyframes, [property]: next } }));
+    const keys = linkScale && (property === 'scaleX' || property === 'scaleY') ? ['scaleX', 'scaleY'] as const : [property];
+    const current = animatedTransform(selectedLayer, playhead);
+    const remove = selectedLayer.keyframes[property]?.some(frame => Math.abs(frame.timeMs-playhead) < 1);
+    updateLayer(selectedLayer.id, layer => {
+      const keyframes = { ...layer.keyframes };
+      for (const key of keys) {
+        const frames = (keyframes[key] || []).filter(frame => Math.abs(frame.timeMs-playhead) >= 1);
+        keyframes[key] = remove ? frames : [...frames, { id: makeId(), timeMs: playhead, value: current[key], easing: 'linear' as const }].sort((a,b) => a.timeMs-b.timeMs);
+      }
+      return { ...layer, keyframes };
+    });
   };
 
   const addEffect = (definition: EffectDefinition) => {
@@ -223,7 +237,7 @@ function App() {
 
   const exportProjectFile = () => {
     if (!project) return;
-    void exportPortableProject(project);
+    void exportPortableProject(project).catch(error => setNotice(`Falha ao exportar cópia: ${String(error)}`));
   };
 
   const removeSelected = () => {
@@ -291,7 +305,6 @@ function App() {
   const seconds = durations(project);
   const pxPerSecond = 72 * zoom;
   const timelineWidth = seconds * pxPerSecond;
-  const previewFilter = selectedLayer?.effects.filter((effect) => effect.enabled).map(cssFilterForEffect).filter(Boolean).join(' ') || 'none';
 
   return <main className="editor-shell">
     <header className="editor-topbar">
@@ -332,10 +345,11 @@ function App() {
       <section className="center-workspace">
         <div className="preview-topbar"><div><span className="preview-label">PRÉVIA</span><span className="preview-quality"> · {project.width} × {project.height} · {project.fps} fps</span></div><div className="preview-tools"><button className="icon-button small" title="Tela cheia"><Maximize2 size={15} /></button><button className="icon-button small" title="Ajuste de prévia"><ChevronDown size={14} /></button></div></div>
         <div className="preview-stage-wrap"><div ref={previewStageRef} className="preview-stage" style={{ aspectRatio: `${project.width} / ${project.height}`, backgroundColor: project.backgroundColor }}>
-          {project.layers.filter((layer) => layer.kind !== 'audio' && playhead >= layer.startMs && playhead <= layer.endMs).map((layer) => <PreviewLayer key={layer.id} layer={layer} projectId={project.id} playhead={playhead} playing={playing} projectWidth={project.width} projectHeight={project.height} stageWidth={previewStageSize.width} stageHeight={previewStageSize.height} selected={layer.id === selectedLayerId} filter={layer.id === selectedLayerId ? previewFilter : 'none'} onClick={() => setSelectedLayerId(layer.id)} />)}
+          {project.layers.filter((layer) => layer.kind !== 'audio' && playhead >= layer.startMs && playhead <= layer.endMs).map((layer) => <PreviewLayer key={layer.id} layer={layer} projectId={project.id} playhead={playhead} playing={playing} projectWidth={project.width} projectHeight={project.height} stageWidth={previewStageSize.width} stageHeight={previewStageSize.height} selected={layer.id === selectedLayerId} filter={layer.effects.filter(effect => effect.enabled).map(cssFilterForEffect).filter(Boolean).join(' ') || 'none'} onClick={() => setSelectedLayerId(layer.id)} />)}
+          {project.layers.filter(layer => layer.kind === 'audio' && playhead >= layer.startMs && playhead < layer.endMs).map(layer => <AudioPreview key={layer.id} layer={layer} projectId={project.id} playhead={playhead} playing={playing}/>)}
           {!project.layers.filter((layer) => layer.kind !== 'audio').length && <div className="preview-placeholder"><span className="placeholder-play"><Play size={18} fill="currentColor" /></span><strong>Prévia do projeto</strong><small>Adicione mídia, texto ou formas para começar</small><button onClick={() => void importMedia()}><Plus size={15} /> Adicionar mídia</button></div>}
         </div></div>
-        <div className="preview-controls"><div className="preview-time"><strong>{formatClock(playhead)}</strong><span>/ {formatClock(project.durationMs)}</span></div><div className="transport"><button onClick={() => setPlayhead(0)} title="Voltar ao início"><SkipBack size={17} /></button><button className="play-control" onClick={() => setPlaying(!playing)} title={playing ? 'Pausar' : 'Reproduzir'}>{playing ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button onClick={() => setPlayhead(Math.min(project.durationMs, playhead + 1000 / project.fps))} title="Próximo quadro"><SkipForward size={17} /></button></div><div className="preview-controls-end"><button className="icon-button small" onClick={() => setShowKeyframes(!showKeyframes)} title="Curvas e keyframes"><Activity size={16} /></button><button className="icon-button small" title="Visualização"><Grid2X2 size={15} /></button></div></div>
+        <div className="preview-controls"><div className="preview-time"><strong>{formatClock(playhead, project.fps)}</strong><span>/ {formatClock(project.durationMs)}</span></div><div className="transport"><button onClick={() => setPlayhead(0)} title="Voltar ao início"><SkipBack size={17} /></button><button className="play-control" onClick={() => setPlaying(!playing)} title={playing ? 'Pausar' : 'Reproduzir'}>{playing ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button onClick={() => setPlayhead(Math.min(project.durationMs, playhead + 1000 / project.fps))} title="Próximo quadro"><SkipForward size={17} /></button></div><div className="preview-controls-end"><button className="icon-button small" onClick={() => setShowKeyframes(!showKeyframes)} title="Curvas e keyframes"><Activity size={16} /></button><button className="icon-button small" title="Visualização"><Grid2X2 size={15} /></button></div></div>
       </section>
 
       <aside className="inspector-panel">
@@ -343,14 +357,15 @@ function App() {
         {selectedLayer ? <>
           <div className="inspector-layer-heading"><FileTypeIcon kind={selectedLayer.kind} /><div><strong>{selectedLayer.name}</strong><small>{nameForKind(selectedLayer.kind)} · {formatClock(selectedLayer.startMs)} — {formatClock(selectedLayer.endMs)}</small></div><button className="icon-button small" title="Excluir camada" onClick={removeSelected}><Trash2 size={15} /></button></div>
           <div className="property-section"><div className="section-heading"><strong>Transformar</strong><button className="icon-button small"><RotateCcw size={14} /></button></div>
-            <TransformField label="Posição X" value={selectedLayer.transform.x} suffix="px" onChange={(v) => changeTransform('x', v)} onKeyframe={() => toggleKeyframe('x')} active={Boolean(selectedLayer.keyframes.x?.some((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1))} />
-            <TransformField label="Posição Y" value={selectedLayer.transform.y} suffix="px" onChange={(v) => changeTransform('y', v)} onKeyframe={() => toggleKeyframe('y')} active={Boolean(selectedLayer.keyframes.y?.some((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1))} />
+            <TransformField label="Posição X" value={animatedTransform(selectedLayer, playhead).x} suffix="px" onChange={(v) => changeTransform('x', v)} onKeyframe={() => toggleKeyframe('x')} active={Boolean(selectedLayer.keyframes.x?.some((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1))} />
+            <TransformField label="Posição Y" value={animatedTransform(selectedLayer, playhead).y} suffix="px" onChange={(v) => changeTransform('y', v)} onKeyframe={() => toggleKeyframe('y')} active={Boolean(selectedLayer.keyframes.y?.some((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1))} />
             <div className="motion-size-panel"><header><strong>Tamanho</strong><button aria-pressed={linkScale} onClick={() => setLinkScale(!linkScale)}>{linkScale ? '🔗 Vinculado' : 'Desvinculado'}</button></header>{(['scaleX', 'scaleY'] as const).map((key, index) => <div key={key}><TransformField label={index === 0 ? 'Largura' : 'Altura'} value={animatedTransform(selectedLayer, playhead)[key] * 100} suffix="%" onChange={value => changeTransform(key, value / 100)} onKeyframe={() => toggleKeyframe(key)} active={Boolean(selectedLayer.keyframes[key]?.some(frame => Math.abs(frame.timeMs-playhead) < 1))}/><input aria-label={index === 0 ? 'Escala horizontal' : 'Escala vertical'} type="range" min="1" max="400" step="0.1" value={animatedTransform(selectedLayer, playhead)[key] * 100} onChange={event => changeTransform(key, Number(event.target.value)/100)}/></div>)}</div>
-            <TransformField label="Rotação" value={selectedLayer.transform.rotation} suffix="°" onChange={(v) => changeTransform('rotation', v)} onKeyframe={() => toggleKeyframe('rotation')} active={Boolean(selectedLayer.keyframes.rotation?.some((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1))} />
-            <TransformField label="Opacidade" value={selectedLayer.transform.opacity * 100} suffix="%" onChange={(v) => changeTransform('opacity', v / 100)} onKeyframe={() => toggleKeyframe('opacity')} active={Boolean(selectedLayer.keyframes.opacity?.some((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1))} />
+            <TransformField label="Rotação" value={animatedTransform(selectedLayer, playhead).rotation} suffix="°" onChange={(v) => changeTransform('rotation', v)} onKeyframe={() => toggleKeyframe('rotation')} active={Boolean(selectedLayer.keyframes.rotation?.some((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1))} />
+            <TransformField label="Opacidade" value={animatedTransform(selectedLayer, playhead).opacity * 100} suffix="%" onChange={(v) => changeTransform('opacity', v / 100)} onKeyframe={() => toggleKeyframe('opacity')} active={Boolean(selectedLayer.keyframes.opacity?.some((keyframe) => Math.abs(keyframe.timeMs - playhead) < 1))} />
           </div>
           {selectedLayer.kind === 'text' && <div className="property-section"><div className="section-heading"><strong>Texto</strong><Type size={14} /></div><textarea className="text-input" value={selectedLayer.text || ''} onChange={(event) => updateLayer(selectedLayer.id, (layer) => ({ ...layer, text: event.target.value }))} /><div className="text-style-row"><button className="secondary-button compact">Roboto <ChevronDown size={13} /></button><button className="secondary-button compact">24 px <ChevronDown size={13} /></button><button className="icon-button small"><Star size={15} /></button></div></div>}
           {selectedLayer.effects.length > 0 && <div className="property-section"><div className="section-heading"><strong>Efeitos</strong><span className="mini-count">{selectedLayer.effects.length}</span><button className="icon-button small" onClick={() => setPanel('effects')}><Plus size={14} /></button></div>{selectedLayer.effects.map((effect) => <EffectInspector key={effect.id} effect={effect} catalog={catalog} onChange={(next) => updateLayer(selectedLayer.id, (layer) => ({ ...layer, effects: layer.effects.map((item) => item.id === next.id ? next : item) }))} onRemove={() => updateLayer(selectedLayer.id, (layer) => ({ ...layer, effects: layer.effects.filter((item) => item.id !== effect.id) }))} />)}</div>}
+          {(selectedLayer.kind === 'audio' || selectedLayer.kind === 'video') && <div className="property-section"><strong>Áudio</strong><label className="effect-parameter">Volume<input aria-label="Volume" type="range" min="0" max="1" step="0.01" value={selectedLayer.audio.volume} onChange={event => updateLayer(selectedLayer.id, layer => ({ ...layer, audio: { ...layer.audio, volume: Number(event.target.value) } }))}/></label><label className="effect-parameter">Silenciar<input type="checkbox" checked={selectedLayer.audio.muted} onChange={event => updateLayer(selectedLayer.id, layer => ({ ...layer, audio: { ...layer.audio, muted: event.target.checked } }))}/></label></div>}
           {showKeyframes && <CurveEditor layer={selectedLayer} playhead={playhead} onSeek={setPlayhead} onChange={(property, id, bezier) => updateLayer(selectedLayer.id, layer => ({ ...layer, keyframes: { ...layer.keyframes, [property]: layer.keyframes[property].map(frame => frame.id === id ? { ...frame, easing: 'cubic-bezier', bezier } : frame) } }))} />}
         </> : <div className="project-inspector"><span className="large-project-icon"><Film size={22} /></span><h3>Configurações do projeto</h3><p>{project.width} × {project.height} · {project.fps} quadros/s</p><button className="secondary-button full-width" onClick={() => void importMedia()}><Plus size={16} /> Adicionar mídia</button><button className="secondary-button full-width" onClick={() => addLayer('text')}><Type size={16} /> Adicionar texto</button></div>}
       </aside>
@@ -419,16 +434,18 @@ function PreviewLayer({ layer, projectId, playhead, playing, projectWidth, proje
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    video.volume = Math.max(0, Math.min(1, layer.audio.volume));
+    video.muted = layer.audio.muted;
     const targetTime = Math.max(0, (playhead - layer.startMs + (layer.sourceOffsetMs ?? 0)) / 1000);
     if (Math.abs(video.currentTime - targetTime) > (playing ? 0.35 : 0.04)) video.currentTime = targetTime;
     if (playing) void video.play().catch(() => undefined);
     else video.pause();
-  }, [playhead, playing, layer.startMs, layer.sourceOffsetMs, source]);
+  }, [playhead, playing, layer.startMs, layer.sourceOffsetMs, layer.audio.volume, layer.audio.muted, source]);
   const transform = animatedTransform(layer, playhead);
   const scaleX = stageWidth / Math.max(1, projectWidth); const scaleY = stageHeight / Math.max(1, projectHeight);
   const style: CSSProperties = { transform: `translate(-50%, -50%) translate(${transform.x * scaleX}px, ${transform.y * scaleY}px) scale(${transform.scaleX}, ${transform.scaleY}) rotate(${transform.rotation}deg)`, opacity: transform.opacity, filter };
   return <div className={`preview-layer ${selected ? 'selected' : ''}`} style={style} onClick={(event) => { event.stopPropagation(); onClick(); }}>
-    {layer.kind === 'text' ? <span className="preview-text">{layer.text || layer.name}</span> : layer.kind === 'shape' ? <span className="preview-shape" style={{ background: layer.fillColor }} /> : layer.kind === 'audio' ? null : source ? layer.kind === 'video' ? <video ref={videoRef} src={source} muted playsInline /> : <img src={source} /> : <div className="missing-media"><Image size={20} /><small>{layer.name}</small></div>}
+    {layer.kind === 'text' ? <span className="preview-text">{layer.text || layer.name}</span> : layer.kind === 'shape' ? <span className="preview-shape" style={{ background: layer.fillColor }} /> : layer.kind === 'audio' ? null : source ? layer.kind === 'video' ? <video ref={videoRef} src={source} muted={layer.audio.muted} playsInline /> : <img src={source} /> : <div className="missing-media"><Image size={20} /><small>{layer.name}</small></div>}
     {selected && <div className="selection-frame"><i /><i /><i /><i /></div>}
   </div>;
 }
@@ -503,11 +520,12 @@ function animatedTransform(layer: MotionLayer, timeMs: number): MotionLayer['tra
     if (timeMs >= sorted[sorted.length - 1].timeMs) { output[property as keyof typeof output] = Number(sorted[sorted.length - 1].value); continue; }
     const rightIndex = sorted.findIndex((keyframe) => keyframe.timeMs >= timeMs);
     const left = sorted[rightIndex - 1]; const right = sorted[rightIndex];
+    if (timeMs === right.timeMs) { output[property as keyof typeof output] = Number(right.value); continue; }
     let amount = (timeMs - left.timeMs) / Math.max(1, right.timeMs - left.timeMs);
     if (left.easing === 'cubic-bezier' && left.bezier) amount = cubicBezier(amount, left.bezier);
-    else if (left.easing === 'ease-in') amount *= amount;
-    else if (left.easing === 'ease-out') amount = 1 - (1 - amount) ** 2;
-    else if (left.easing === 'ease-in-out') amount = amount * amount * (3 - 2 * amount);
+    else if (left.easing === 'ease-in') amount = cubicBezier(amount, [.42,0,1,1]);
+    else if (left.easing === 'ease-out') amount = cubicBezier(amount, [0,0,.58,1]);
+    else if (left.easing === 'ease-in-out') amount = cubicBezier(amount, [.42,0,.58,1]);
     else if (left.easing === 'step') amount = 0;
     output[property as keyof typeof output] = Number(left.value) + (Number(right.value) - Number(left.value)) * amount;
   }
@@ -543,7 +561,7 @@ async function exportPortableProject(project: VideoProject) {
     try {
       const base64 = await desktop.readAssetData(project.id, layer.assetPath);
       archive.file(`assets/${layer.assetPath}`, base64, { base64: true });
-    } catch { /* Keep a project reference when the source asset is unavailable. */ }
+    } catch { throw new Error(`Mídia indisponível: ${layer.name}. A cópia não foi gerada para evitar perda de arquivos.`); }
   }
   const blob = await archive.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 4 } });
   const url = URL.createObjectURL(blob);

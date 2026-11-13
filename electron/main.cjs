@@ -1,9 +1,11 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell, protocol, net } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
+
+protocol.registerSchemesAsPrivileged([{ scheme: 'vmasset', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 
 const isDev = !app.isPackaged;
 let mainWindow;
@@ -103,6 +105,14 @@ function displayName(filePath) { return path.basename(filePath, path.extname(fil
 
 app.whenReady().then(async () => {
   await ensureProjectsDir();
+  protocol.handle('vmasset', async request => {
+    try {
+      const url = new URL(request.url);
+      const { root, resolved } = await pathInAssets(url.hostname, decodeURIComponent(url.pathname.slice(1)));
+      if (!resolved.startsWith(root + path.sep) || !MEDIA_TYPES.has(path.extname(resolved).toLowerCase())) return new Response('Invalid media path', { status: 403 });
+      return net.fetch(pathToFileURL(resolved).href, { headers: request.headers });
+    } catch { return new Response('Media unavailable', { status: 404 }); }
+  });
   emitUpdaterEvents();
   ipcMain.handle('projects:list', async () => {
     const entries = await fs.readdir(PROJECTS_DIR(), { withFileTypes: true });
@@ -185,7 +195,7 @@ app.whenReady().then(async () => {
     const { root, resolved } = await pathInAssets(id, relativePath);
     if (!resolved.startsWith(root + path.sep)) throw new Error('Invalid asset path.');
     await fs.access(resolved);
-    return pathToFileURL(resolved).href;
+    return `vmasset://${safeId(id)}/${encodeURIComponent(relativePath)}`;
   });
   ipcMain.handle('projects:read-asset-data', async (_event, id, relativePath) => {
     const { root, resolved } = await pathInAssets(id, relativePath);
