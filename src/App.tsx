@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { parseAlightTransfer } from './alightImport';
 import JSZip from 'jszip';
+import { EffectParameterControl } from './EffectParameterControl';
+import { parameterDefault } from './effectParameters';
 import { AudioPreview } from './AudioPreview';
 import { CurveEditor } from './CurveEditor';
 import { cubicBezier } from './bezier';
@@ -459,31 +461,12 @@ function EffectInspector({ effect, catalog, onChange, onRemove }: { effect: Moti
   const parameters = definition ? safeParseParameters(definition.parameters_json) : [];
   const preview = effect.preview || definition?.preview;
   return <div className="effect-inspector"><div className="effect-inspector-head"><span className="effect-mini-thumb">{preview ? <img loading="lazy" alt={`Prévia de ${effect.name}`} src={`./previews/effects/${preview}`} /> : <Sparkles size={13} />}</span><strong>{definition?.name || effect.name}</strong><button className="icon-button tiny" onClick={() => onChange({ ...effect, enabled: !effect.enabled })} title={effect.enabled ? 'Desativar efeito' : 'Ativar efeito'}><Eye size={13} /></button><button className="icon-button tiny" onClick={onRemove} title="Remover efeito"><X size={13} /></button></div>
+    {definition?.description && <p className="effect-description">{definition.description}</p>}
+    <button className="effect-reset-all" onClick={() => onChange({ ...effect, parameters: { ...effect.parameters, ...Object.fromEntries(parameters.map(parameter => [parameter.id, parameterDefault(parameter)])) } })}>↺ Restaurar ajustes do efeito</button>
     {parameters.map((parameter) => <EffectParameterControl key={parameter.id} parameter={parameter} value={effect.parameters[parameter.id]} onChange={(value) => onChange({ ...effect, parameters: { ...effect.parameters, [parameter.id]: value } })} />)}
     {effect.compatibility === 'native' && <div className="compatibility-note">Prévia aproximada no editor</div>}
     {effect.compatibility === 'metadata-only' && <div className="compatibility-note">Controle recuperado · renderização ainda indisponível</div>}
   </div>;
-}
-
-function EffectParameterControl({ parameter, value, onChange }: { parameter: EffectParameter; value: MotionEffect['parameters'][string]; onChange: (value: string | number | boolean | number[]) => void }) {
-  if (parameter.kind === 'tip' || parameter.kind === 'section') return null;
-  const numeric = Number((value ?? parameter.default) || 0);
-  if (['point', 'xyz', 'orient'].includes(parameter.kind)) {
-    const count = parameter.kind === 'point' ? 2 : 3;
-    const vector = Array.isArray(value) ? value : Array.from({ length: count }, (_, index) => Number(parameter.default.split(',')[index]) || 0);
-    return <div className="effect-parameter"><span>{parameter.label || parameter.id}</span><div className="effect-vector">{vector.slice(0, count).map((axis, index) => <label key={index}><small>{parameter.kind === 'point' ? ['X', 'Y'][index] : ['X', 'Y', 'Z'][index]}</small><input type="number" step="0.1" value={Number(axis) || 0} onChange={(event) => { const next = [...vector]; next[index] = Number(event.target.value); onChange(next); }} /></label>)}</div></div>;
-  }
-  if (parameter.kind === 'switch') return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} /></label>;
-  if (parameter.kind === 'selector') {
-    const choices = parameter.choices.map((choice) => choice.split('='));
-    return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><select value={String(value ?? parameter.default)} onChange={(event) => onChange(event.target.value)}>{choices.length ? choices.map(([label, option]) => <option key={option} value={option}>{label}</option>) : <option value={String(value ?? parameter.default)}>{String(value ?? parameter.default)}</option>}</select></label>;
-  }
-  if (parameter.kind === 'spinner' || parameter.kind === 'float') return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><input aria-label={parameter.label || parameter.id} type="number" min={parameter.min === '' ? undefined : Number(parameter.min)} max={parameter.max === '' ? undefined : Number(parameter.max)} step={parameter.step || 'any'} value={Number.isFinite(numeric) ? numeric : 0} onChange={event => { if (event.target.value === '') return; const next=Number(event.target.value); if (!Number.isFinite(next)) return; const min=parameter.min === '' ? -Infinity : Number(parameter.min); const max=parameter.max === '' ? Infinity : Number(parameter.max); onChange(Math.max(min,Math.min(max,next))); }}/></label>;
-  if (parameter.kind === 'color') return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><input type="color" value={/^#[\da-f]{6}$/i.test(String(value)) ? String(value) : '#ffffff'} onChange={(event) => onChange(event.target.value)} /></label>;
-  if (parameter.kind === 'hue-disc') return <label className="effect-parameter"><span>{parameter.label || parameter.id}</span><input type="color" value={/^#[\da-f]{6}$/i.test(String(value)) ? String(value) : '#ff4f9a'} onChange={(event) => onChange(event.target.value)} /></label>;
-  if (parameter.kind === 'tip' || parameter.kind === 'section') return null;
-  const min = Number(parameter.min || 0); const max = Number(parameter.max || 100);
-  return <label className="effect-parameter slider-parameter"><span>{parameter.label || parameter.id}<b>{numeric.toFixed(2)}</b></span><input type="range" min={min} max={max} step={Number(parameter.step || 0.01)} value={numeric} onChange={(event) => onChange(Number(event.target.value))} /></label>;
 }
 
 function UpdateToast({ update, onDownload, onInstall, onClose }: { update: UpdateStatus | null; onDownload: () => void; onInstall: () => void; onClose: () => void }) {
@@ -503,15 +486,7 @@ function FileTypeIcon({ kind }: { kind: MotionLayer['kind'] }) {
 }
 
 function parseEffectParameters(effect: EffectDefinition) {
-  return Object.fromEntries(safeParseParameters(effect.parameters_json).map((parameter) => {
-    const value = parameter.default;
-    if (parameter.kind === 'switch') return [parameter.id, value === 'true' || value === '1'];
-    if (parameter.kind === 'point') return [parameter.id, [0, 0]];
-    if (parameter.kind === 'xyz' || parameter.kind === 'orient') return [parameter.id, [0, 0, 0]];
-    if (parameter.kind === 'hue-disc') return [parameter.id, '#ff4f9a'];
-    if (value === '') return [parameter.id, 0];
-    return [parameter.id, Number.isFinite(Number(value)) ? Number(value) : value];
-  }));
+  return Object.fromEntries(safeParseParameters(effect.parameters_json).map(parameter => [parameter.id, parameterDefault(parameter)]));
 }
 function safeParseParameters(raw: string): EffectParameter[] { try { return JSON.parse(raw || '[]') as EffectParameter[]; } catch { return []; } }
 function animatedTransform(layer: MotionLayer, timeMs: number): MotionLayer['transform'] {

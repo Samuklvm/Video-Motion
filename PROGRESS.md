@@ -15,6 +15,11 @@ Corrigidos durante a inspeção: corte da timeline em janela baixa, barra de rol
 
 ## Mudanças em main posteriores à release
 
+- Painel de parâmetros refeito: campos e sliders respeitando limites, seletores, switches, vetores com limites por eixo, cores ARGB com alpha e restauração por parâmetro/efeito.
+- Padrões de vetores e hue-disc preservados em vez de substituídos por zero ou uma cor arbitrária. Hue-disc permanece com componentes numéricos; a roda original ainda não foi reproduzida.
+- Teste interativo de Curvar: seis controles exibidos, ângulo alterado para 96,6 e salvo, depois restaurado para zero e confirmado no arquivo. Shader Curvar segue indisponível.
+- Quatorze testes automatizados passando, incluindo inicialização de todos os parâmetros do catálogo, limites vetoriais, alpha e switches.
+
 - Catálogo: 31 nomes genéricos corrigidos, 259 definições com prévias existentes e quatro novas associações explícitas. As 303 definições permanecem preservadas; 13 internas/experimentais ficam fora da biblioteca normal.
 - Categorias e modos de mesclagem com nomes em português. Nomes recuperados e nomes editoriais têm origem registrada no catálogo.
 - Efeitos importados consultam o catálogo para exibir nome e prévia. Controles numéricos deixam de aparecer como listas de uma única opção.
